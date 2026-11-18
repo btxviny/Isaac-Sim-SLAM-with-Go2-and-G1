@@ -12,15 +12,18 @@ Event driven: one inference per obs message (no wall-clock timer), reply publish
 Output: default_joint_pos + action_scale * action, in the articulation's joint order.
 
     source /opt/ros/jazzy/setup.bash
-    /usr/bin/python3 ~/robots_isaac/ros/policy_ros_node.py --robot go2
+    /usr/bin/python3 ~/robots_isaac/ros/policy_ros_node.py --robot go2      # or: --robot g1  (topics /g1/obs, /g1/joint_commands, /g1/cmd_vel)
 
 One terminal does everything: it runs the policy AND reads keyboard teleop from the terminal (no extra process):
-    w / s  or Up / Down      forward / backward  (+-0.1 m/s per press, held until changed)
-    a / d                    sideways left / right (+-0.1 m/s per press)
-    q / e  or Left / Right   turn left / right    (+-0.2 rad/s per press)
+    w / s  or Up / Down      forward / backward
+    a / d                    sideways left / right
+    q / e  or Left / Right   turn left / right
     space                    stop (zero command)
     Ctrl+C                   quit
-/cmd_vel (Twist) is still accepted; the most recent source wins. Use --no-keyboard to disable the keyboard.
+A key sends its command only for a short moment (--key-hold seconds, default 0.4) and then the robot stops again: tap = a
+short burst, hold = keeps moving (the terminal's key repeat renews it; a terminal cannot see key release). Speeds are
+--key-speed vx,vy,wz (default 0.5,0.3,1.0, clipped to the trained ranges).
+/cmd_vel (Twist) is still accepted; a pressed key overrides it while active. Use --no-keyboard to disable the keyboard.
 """
 
 import argparse
@@ -49,6 +52,15 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # joint order of the articulation (must equal the training order; verified for the Go2)
 JOINTS = {
     "go2": [f"{leg}_{j}_joint" for j in ("hip", "thigh", "calf") for leg in ("FL", "FR", "RL", "RR")],
+    # articulation order of /World/g1_23dof/pelvis in the scene (read from Isaac Sim: SingleArticulation.dof_names)
+    "g1": [
+        "left_hip_pitch_joint", "right_hip_pitch_joint", "waist_yaw_joint", "left_hip_roll_joint", "right_hip_roll_joint",
+        "left_shoulder_pitch_joint", "right_shoulder_pitch_joint", "left_hip_yaw_joint", "right_hip_yaw_joint",
+        "left_shoulder_roll_joint", "right_shoulder_roll_joint", "left_knee_joint", "right_knee_joint",
+        "left_shoulder_yaw_joint", "right_shoulder_yaw_joint", "left_ankle_pitch_joint", "right_ankle_pitch_joint",
+        "left_elbow_joint", "right_elbow_joint", "left_ankle_roll_joint", "right_ankle_roll_joint",
+        "left_wrist_roll_joint", "right_wrist_roll_joint",
+    ],
 }
 RUN_DIR = {"go2": os.path.join(ROOT, "go2", "policy"), "g1": os.path.join(ROOT, "g1", "policy")}
 
@@ -102,7 +114,10 @@ class PolicyNode(Node):
         self.cmd = np.zeros(3, dtype=np.float32)
         self.cmd_time = 0.0
         self.kb_enabled = args.keyboard and sys.stdin.isatty()
-        self.kb_step = np.array([0.1, 0.1, 0.2], dtype=np.float32)  # m/s, m/s, rad/s per key press
+        self.kb_speed = np.clip(np.array(args.key_speed, dtype=np.float32), self.lo, self.hi)  # m/s, m/s, rad/s while a key is active
+        self.kb_hold = args.key_hold  # seconds a key press stays active
+        self.kb_dir = np.zeros(3, dtype=np.float32)
+        self.kb_until = np.zeros(3)  # per axis: wall time until which the key command is active
         self.cmd_timeout = args.cmd_timeout
         self.last_action = np.zeros(self.n, dtype=np.float32)
         self.stats = {"n": 0, "lat": 0.0, "t0": time.time(), "last_step": None, "gaps": 0, "sim_t": 0.0}
@@ -134,7 +149,7 @@ class PolicyNode(Node):
             pass
 
     HELP = (
-        "\r\nkeyboard teleop:  w/s forward/back  a/d sideways  q/e turn (or arrows: up/down, left/right)  space stop  Ctrl+C quit\r\n"
+        "\r\nkeyboard teleop:  w/s forward/back  a/d sideways  q/e turn (or arrows)  tap = short burst, hold = keep moving  space stop  Ctrl+C quit\r\n"
     )
     KEYS = {  # key -> (index of [vx, vy, wz], direction)
         "w": (0, 1), "s": (0, -1), "a": (1, 1), "d": (1, -1), "q": (2, 1), "e": (2, -1),
@@ -151,14 +166,21 @@ class PolicyNode(Node):
                 key = data[i : i + 3] if data[i] == "\x1b" else data[i]
                 i += len(key)
                 if key == " ":
+                    self.kb_until[:] = 0.0
                     self.cmd[:] = 0.0
+                    self.cmd_time = 0.0
                 elif key.lower() in self.KEYS or key in self.KEYS:
                     idx, sign = self.KEYS.get(key, self.KEYS.get(key.lower()))
-                    self.cmd[idx] += sign * self.kb_step[idx]
-                    self.cmd[:] = np.clip(self.cmd, self.lo, self.hi)
-                else:
-                    continue
-                self.cmd_time = float("inf")  # keyboard commands stay until changed
+                    self.kb_dir[idx] = sign
+                    self.kb_until[idx] = time.time() + self.kb_hold  # a repeat (key held) just renews this
+
+    def effective_cmd(self):
+        """Active key commands (short pulses) override /cmd_vel; otherwise the latest /cmd_vel until it times out."""
+        now = time.time()
+        active = self.kb_until > now
+        if active.any():
+            return np.clip(np.where(active, self.kb_dir * self.kb_speed, 0.0), self.lo, self.hi).astype(np.float32)  # e.g. the G1 cannot walk backwards
+        return self.cmd if (now - self.cmd_time) < self.cmd_timeout else np.zeros(3, dtype=np.float32)
 
     def on_cmd(self, msg):
         self.cmd = np.clip(np.array([msg.linear.x, msg.linear.y, msg.angular.z], dtype=np.float32), self.lo, self.hi)
@@ -176,7 +198,7 @@ class PolicyNode(Node):
         if self.stats["last_step"] is not None and step < self.stats["last_step"]:
             self.last_action[:] = 0.0  # simulation was stopped / restarted
         self.stats["last_step"] = step
-        cmd = self.cmd if (time.time() - self.cmd_time) < self.cmd_timeout else np.zeros(3, dtype=np.float32)
+        cmd = self.effective_cmd()
         cmd = np.where(np.abs(cmd) < 0.05, 0.0, cmd).astype(np.float32)  # dead-band: tiny commands -> exact zero (= stand still)
         lin, ang, grav = body[0:3], body[3:6], body[6:9]
         qrel, qd = body[9 : 9 + self.n], body[9 + self.n :]
@@ -192,12 +214,13 @@ class PolicyNode(Node):
     def report(self):
         s = self.stats
         dt = time.time() - s["t0"]
+        c = self.effective_cmd()
         if self.kb_enabled:
             state = f"{s['n'] / dt:4.0f} Hz" if s["n"] else "waiting for sim (press Play)"
-            print(f"\r\x1b[2K[{state}, sim_t={s['sim_t']:.1f}s] cmd vx={self.cmd[0]:+.1f} vy={self.cmd[1]:+.1f} wz={self.cmd[2]:+.1f}", end="", flush=True)
+            print(f"\r\x1b[2K[{state}, sim_t={s['sim_t']:.1f}s] cmd vx={c[0]:+.1f} vy={c[1]:+.1f} wz={c[2]:+.1f}", end="", flush=True)
         elif s["n"]:
             self.get_logger().info(
-                f"{s['n'] / dt:5.1f} Hz wall, inference {1000 * s['lat'] / s['n']:.2f} ms, sim_t={s['sim_t']:.1f}s, cmd={np.round(self.cmd, 2).tolist()}"
+                f"{s['n'] / dt:5.1f} Hz wall, inference {1000 * s['lat'] / s['n']:.2f} ms, sim_t={s['sim_t']:.1f}s, cmd={np.round(c, 2).tolist()}"
             )
         else:
             self.get_logger().info("waiting for observations (is the simulation playing?)")
@@ -210,11 +233,14 @@ def main():
     ap.add_argument("--run", default=None, help="policy folder (default: <robot>/policy)")
     ap.add_argument("--ns", default=None, help="topic namespace (default: the robot name)")
     ap.add_argument("--joint-names", default=None, help="comma list, articulation order (needed for g1)")
-    ap.add_argument("--cmd-topic", default="/cmd_vel")
+    ap.add_argument("--cmd-topic", default=None, help="Twist topic (default: /cmd_vel for the go2, /<ns>/cmd_vel otherwise)")
     ap.add_argument("--no-keyboard", dest="keyboard", action="store_false", help="do not read teleop keys from this terminal")
+    ap.add_argument("--key-hold", type=float, default=0.4, help="seconds a teleop key press stays active (renewed by key repeat)")
+    ap.add_argument("--key-speed", type=lambda v: [float(x) for x in v.split(",")], default=[0.5, 0.3, 1.0], help="vx,vy,wz while a key is active")
     ap.add_argument("--cmd-timeout", type=float, default=0.5, help="seconds without /cmd_vel before the command is zeroed")
     args, ros_args = ap.parse_known_args()
     args.ns = args.ns or args.robot
+    args.cmd_topic = args.cmd_topic or ("/cmd_vel" if args.robot == "go2" else f"/{args.ns}/cmd_vel")
     if args.robot not in JOINTS and not args.joint_names:
         sys.exit("--joint-names is required for this robot")
     rclpy.init(args=ros_args)

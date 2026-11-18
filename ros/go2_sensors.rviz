@@ -36,7 +36,7 @@ Visualization Manager:
       Name: Lidar
       Enabled: true
       Topic:
-        Value: /point_cloud
+        Value: /go2/point_cloud
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
@@ -64,7 +64,7 @@ Visualization Manager:
       Name: RealSense RGB
       Enabled: true
       Topic:
-        Value: /rgb
+        Value: /go2/rgb
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
@@ -78,7 +78,7 @@ Visualization Manager:
       Name: RealSense Depth
       Enabled: true
       Topic:
-        Value: /depth
+        Value: /go2/depth
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last

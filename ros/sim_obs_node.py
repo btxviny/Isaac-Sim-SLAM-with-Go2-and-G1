@@ -13,10 +13,12 @@ Output attribute `outputs:obs` (double[]):  [step, sim_time, lin_vel_b(3), ang_v
 
 import sys
 
-# ---- edit these ------------------------------------------------------------------------------------------------
-ROBOT_PATH = "/World/go2/base"  # articulation root of the robot in the scene
-RUN = "/home/viny/robots_isaac/go2/policy"
-ENV_YAML = RUN + "/params/env.yaml"
+# ---- edit these: one entry per policy graph, keyed by the graph's prim name (see build_policy_graph.py --graph) ----
+_ROOT = "/home/viny/robots_isaac"
+ROBOTS = {
+    "PolicyGraph": ("/World/go2/base", _ROOT + "/go2/policy"),  # Go2 (default)
+    "G1PolicyGraph": ("/World/g1_23dof/pelvis", _ROOT + "/g1/policy"),  # 23-joint G1
+}
 # ---------------------------------------------------------------------------------------------------------------
 _CODE_DIR = "/home/viny/robots_isaac/sim"
 
@@ -29,8 +31,13 @@ def setup(db):
     import velocity_policy
 
     importlib.reload(velocity_policy)
+    # which robot: the script node lives at /World/<graph>/obs_node
+    graph_name = db.node.get_prim_path().split("/")[-2]
+    robot_path, run = ROBOTS.get(graph_name, ROBOTS["PolicyGraph"])
     # policy_path=None: no policy in this process, only the robot state / gains
-    db.per_instance_state.ctl = velocity_policy.VelocityPolicyController(ROBOT_PATH, None, ENV_YAML, log=lambda m: print(m, flush=True), name="obs_node")
+    db.per_instance_state.ctl = velocity_policy.VelocityPolicyController(
+        robot_path, None, run + "/params/env.yaml", log=lambda m: print(m, flush=True), name=graph_name
+    )
     db.per_instance_state.step = 0
     # take over the node's execution output: it is only enabled on policy steps (checked by the node after compute())
     import omni.graph.tools.ogn as ogn

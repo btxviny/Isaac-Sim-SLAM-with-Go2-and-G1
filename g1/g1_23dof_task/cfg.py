@@ -129,6 +129,7 @@ class G123DofFlatPPORunnerCfg(G1FlatPPORunnerCfg):
 from isaaclab.managers import RewardTermCfg as RewTerm  # noqa: E402
 
 from . import mdp_stand  # noqa: E402
+from .commands import SparseVelocityCommandCfg  # noqa: E402
 
 LEG_JOINTS = [".*_hip_.*", ".*_knee_joint", ".*_ankle_.*"]
 FEET = ".*_ankle_roll_link"
@@ -160,7 +161,18 @@ def _add_stand_still_rewards(rewards):
 class G123DofStandFlatEnvCfg(G123DofFlatEnvCfg):
     def __post_init__(self):
         super().__post_init__()
-        self.commands.base_velocity.rel_standing_envs = 0.3  # 30 % of the episodes have an all-zero command
+        old = self.commands.base_velocity
+        self.commands.base_velocity = SparseVelocityCommandCfg(
+            asset_name=old.asset_name,
+            resampling_time_range=old.resampling_time_range,
+            rel_standing_envs=0.3,  # 30 % of the episodes have an all-zero command
+            rel_yaw_only_envs=0.15,  # 15 % turn on the spot (vx = vy = 0)
+            rel_heading_envs=old.rel_heading_envs,
+            heading_command=old.heading_command,
+            heading_control_stiffness=old.heading_control_stiffness,
+            debug_vis=old.debug_vis,
+            ranges=old.ranges,
+        )
         _add_stand_still_rewards(self.rewards)
 
 
