@@ -1,6 +1,6 @@
 """OmniGraph Script Node script (Isaac Sim side of the split architecture): builds the policy observation.
 
-Graph (see build_policy_graph.py):
+Graph /World/PolicyGraph in scene/office.usd:
     On Physics Step --step--> Script Node --execOut--> ROS2 Publisher  (/<ns>/obs)
     On Physics Step --step--> ROS2 Subscriber (/<ns>/joint_commands) -> Articulation Controller (position targets)
 

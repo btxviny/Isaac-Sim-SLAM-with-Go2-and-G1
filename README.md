@@ -49,7 +49,7 @@ Isaac Sim  /World/PolicyGraph                                           ROS 2 (s
   and replies right away (event driven, no timer).
 - If `policy_ros_node.py` is not running, nothing commands the Go2's joints and it only holds the PD gains.
 - The graph stores the full path `/home/viny/robots_isaac/ros/sim_obs_node.py` (Script Node `scriptPath`). If
-  the repo moves, rebuild the graph (`ros/build_policy_graph.py`, below).
+  the repo moves, update `scriptPath` on `/World/PolicyGraph/obs_node` in Isaac Sim (Property panel) and save the scene.
 
 The two graphs are independent: you can use the sensors without the policy node, and the policy without looking at the
 sensors.
@@ -76,7 +76,6 @@ robots_isaac/
 ├── ros/                   the PolicyGraph's two ends, and RViz
 │   ├── sim_obs_node.py        the Script Node file inside /World/PolicyGraph (runs in Isaac Sim)
 │   ├── policy_ros_node.py     the policy as a ROS 2 node, with keyboard teleop       -> /usr/bin/python3 ...
-│   ├── build_policy_graph.py  (re)build /World/PolicyGraph in office.usd             -> ~/isaac-sim-5.1.0/python.sh ...
 │   ├── run_scene.py           play office.usd headless and report the Go2's pose (tests)
 │   └── go2_sensors.rviz       RViz config: lidar, RGB, depth
 └── third_party/unitree_ros/   upstream Unitree repo (robot descriptions), not modified
@@ -197,12 +196,8 @@ Headless test instead of the window: `./python.sh ~/robots_isaac/ros/run_scene.p
 inference 0.1 ms, the Go2 walked 6.2 m at 0.5 m/s and stayed upright. The simulator does not wait for the policy, so with
 real-time simulation the command is at most one policy step late.
 
-Rebuild the graph (after moving the repo, or to change robot / topics). This replaces `/World/PolicyGraph` in `office.usd` in place:
-
-```bash
-source ~/isaac-sim-5.1.0/setup_ros_env.sh && cd ~/isaac-sim-5.1.0
-./python.sh ~/robots_isaac/ros/build_policy_graph.py [--robot-path /World/go2/base] [--ns go2] [--out <copy.usd>]
-```
+To change the robot or topics, edit the nodes of `/World/PolicyGraph` in Isaac Sim (`obs_publisher` / `cmd_subscriber`
+topic names, `articulation_controller` robot path) and save the scene.
 
 ## Sensors in RViz
 
@@ -223,7 +218,7 @@ Fixed Frame at `hesai` or add a **ROS2 Publish Transform Tree** node to the Acti
 
 - **Carpet collider:** the office carpet is a zero-thickness mesh, and the G1 fell through its contacts within seconds.
   `/World/thick_floor` is an invisible 1 m box with its top 1 mm below the carpet (friction 1.0), and the G1 walks upright on it.
-  `build_policy_graph.py` and `office_standalone.py` add it if it is missing (`--no-thick-floor` turns that off).
+  `office_standalone.py` adds it if it is missing (`--no-thick-floor` turns that off) (it is already saved in `office.usd` if the graph was built with the old script).
 - The RealSense asset carries its own rigid body, which sits inside the Go2's `base` rigid body and causes PhysX errors.
   Remove the Rigid Body from `RSD455` (right-click > Remove > Physics > Rigid Body). A leftover harmless message at startup:
   "Pattern '.../RSD455' did not match any rigid bodies".
