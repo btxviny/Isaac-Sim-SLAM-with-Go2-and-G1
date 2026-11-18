@@ -76,7 +76,6 @@ robots_isaac/
 ├── ros/                   the PolicyGraph's two ends, and RViz
 │   ├── sim_obs_node.py        the Script Node file inside /World/PolicyGraph (runs in Isaac Sim)
 │   ├── policy_ros_node.py     the policy as a ROS 2 node, with keyboard teleop       -> /usr/bin/python3 ...
-│   ├── run_scene.py           play office.usd headless and report the Go2's pose (tests)
 │   └── go2_sensors.rviz       RViz config: lidar, RGB, depth
 └── third_party/unitree_ros/   upstream Unitree repo (robot descriptions), not modified
 ```
@@ -190,14 +189,6 @@ source /opt/ros/jazzy/setup.bash
 
 Commands are limited to the trained ranges. `/cmd_vel` (Twist) is accepted too, and the latest source wins. With `--no-keyboard`,
 a `/cmd_vel` older than 0.5 s counts as zero.
-
-Headless test instead of the window: `./python.sh ~/robots_isaac/ros/run_scene.py --headless --seconds 16 --realtime`
-(from `~/isaac-sim-5.1.0` after `source setup_ros_env.sh`), with the policy node running. Checked: observations at 50.0 Hz,
-inference 0.1 ms, the Go2 walked 6.2 m at 0.5 m/s and stayed upright. The simulator does not wait for the policy, so with
-real-time simulation the command is at most one policy step late.
-
-To change the robot or topics, edit the nodes of `/World/PolicyGraph` in Isaac Sim (`obs_publisher` / `cmd_subscriber`
-topic names, `articulation_controller` robot path) and save the scene.
 
 ## Sensors in RViz
 
